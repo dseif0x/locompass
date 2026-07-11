@@ -1,5 +1,5 @@
 .DS_Store
-app/CompassFriends.xcodeproj/
+app/Locompass.xcodeproj/
 app/build/
 DerivedData/
 *.xcuserstate

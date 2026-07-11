@@ -22,18 +22,18 @@ jobs:
         working-directory: app
         run: |
           xcodebuild \
-            -project CompassFriends.xcodeproj \
-            -scheme CompassFriends \
+            -project Locompass.xcodeproj \
+            -scheme Locompass \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath build/CompassFriends.xcarchive \
+            -archivePath build/Locompass.xcarchive \
             archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
       - name: Verify app bundle
         working-directory: app
         run: |
-          APP=build/CompassFriends.xcarchive/Products/Applications/CompassFriends.app
+          APP=build/Locompass.xcarchive/Products/Applications/Locompass.app
           plutil -p "$APP/Info.plist"
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
           test -f "$APP/$EXEC" || { echo "::error::CFBundleExecutable '$EXEC' not found in bundle"; exit 1; }
@@ -42,55 +42,128 @@ jobs:
         working-directory: app
         run: |
           mkdir -p build/Payload
-          cp -R build/CompassFriends.xcarchive/Products/Applications/CompassFriends.app build/Payload/
-          (cd build && zip -qr CompassFriends-unsigned.ipa Payload)
+          cp -R build/Locompass.xcarchive/Products/Applications/Locompass.app build/Payload/
+          (cd build && zip -qr Locompass-unsigned.ipa Payload)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CompassFriends-unsigned-ipa
-          path: app/build/CompassFriends-unsigned.ipa
+          name: Locompass-unsigned-ipa
+          path: app/build/Locompass-unsigned.ipa
 
-  # Optional signed build — runs on manual dispatch when signing secrets exist:
-  #   BUILD_CERT_P12_BASE64, P12_PASSWORD, PROVISIONING_PROFILE_BASE64, KEYCHAIN_PASSWORD
-  signed:
+  # Ad-hoc signed build + OTA install page on GitHub Pages.
+  # Needs one repo secret: BUILD_CERT_P12_BASE64 (base64 of the distribution
+  # .p12, password "locompass-ci" — the secret store is what protects the key).
+  # The ad-hoc provisioning profile lives at app/Signing/Locompass_AdHoc.mobileprovision.
+  adhoc:
     runs-on: macos-15
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check signing secret
+        id: creds
+        env:
+          P12_B64: ${{ secrets.BUILD_CERT_P12_BASE64 }}
+        run: |
+          if [ -n "$P12_B64" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "BUILD_CERT_P12_BASE64 secret not set — skipping ad-hoc build."
+          fi
+
       - name: Install XcodeGen
+        if: steps.creds.outputs.ok == 'true'
         run: brew install xcodegen
+
       - name: Generate Xcode project
+        if: steps.creds.outputs.ok == 'true'
         working-directory: app
         run: xcodegen generate
-      - name: Import certificate & profile
-        env:
-          BUILD_CERT_P12_BASE64: ${{ secrets.BUILD_CERT_P12_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          [ -z "$BUILD_CERT_P12_BASE64" ] && { echo "No signing secrets — skipping."; exit 0; }
-          KEYCHAIN="$RUNNER_TEMP/app.keychain-db"
-          echo "$BUILD_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          echo "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/pp.mobileprovision"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security list-keychain -d user -s "$KEYCHAIN"
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp "$RUNNER_TEMP/pp.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/
-      - name: Archive & export signed IPA
+
+      - name: Build archive (no signing)
+        if: steps.creds.outputs.ok == 'true'
         working-directory: app
         run: |
-          xcodebuild -project CompassFriends.xcodeproj -scheme CompassFriends \
-            -configuration Release -sdk iphoneos \
-            -archivePath build/CompassFriends.xcarchive archive
-          xcodebuild -exportArchive -archivePath build/CompassFriends.xcarchive \
-            -exportOptionsPlist ExportOptions.plist -exportPath build/export
-      - name: Upload signed IPA
+          xcodebuild \
+            -project Locompass.xcodeproj \
+            -scheme Locompass \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/Locompass.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Import signing identity
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          P12_B64: ${{ secrets.BUILD_CERT_P12_BASE64 }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/ci.keychain-db"
+          security create-keychain -p locompass-ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p locompass-ci "$KEYCHAIN"
+          echo "$P12_B64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -P locompass-ci -A -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k locompass-ci "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Re-sign with ad-hoc profile
+        if: steps.creds.outputs.ok == 'true'
+        working-directory: app
+        run: |
+          APP=build/Locompass.xcarchive/Products/Applications/Locompass.app
+          cp Signing/Locompass_AdHoc.mobileprovision "$APP/embedded.mobileprovision"
+          cat > "$RUNNER_TEMP/entitlements.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>application-identifier</key>
+              <string>T249M66CSD.com.example.locompass</string>
+              <key>com.apple.developer.team-identifier</key>
+              <string>T249M66CSD</string>
+              <key>get-task-allow</key>
+              <false/>
+              <key>keychain-access-groups</key>
+              <array>
+                  <string>T249M66CSD.com.example.locompass</string>
+              </array>
+          </dict>
+          </plist>
+          EOF
+          codesign --force \
+            --sign "Apple Distribution: Daniel Seifert (T249M66CSD)" \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" \
+            "$APP"
+          codesign --verify --verbose=2 "$APP"
+          mkdir -p build/signed/Payload
+          cp -R "$APP" build/signed/Payload/
+          (cd build/signed && zip -qr ../Locompass.ipa Payload)
+
+      - name: Upload signed IPA artifact
+        if: steps.creds.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: CompassFriends-signed-ipa
-          path: app/build/export/*.ipa
+          name: Locompass-adhoc-ipa
+          path: app/build/Locompass.ipa
+
+      - name: Publish OTA install page to gh-pages
+        if: steps.creds.outputs.ok == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir site
+          cp distribution/index.html distribution/manifest.plist site/
+          cp app/build/Locompass.ipa site/
+          touch site/.nojekyll
+          cd site
+          git init -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy OTA install page"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Locompass</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; text-align: center;
+  }
+  h1 { font-size: 2rem; margin: 0 0 8px; }
+  p { color: #666; max-width: 28rem; line-height: 1.5; }
+  @media (prefers-color-scheme: dark) { p { color: #aaa; } }
+  .btn {
+    display: inline-block; margin-top: 24px; padding: 16px 48px;
+    background: #0a84ff; color: #fff; border-radius: 14px;
+    font-size: 1.25rem; font-weight: 600; text-decoration: none;
+  }
+  .hint { font-size: .85rem; margin-top: 32px; }
+</style>
+</head>
+<body>
+  <h1>&#x1F9ED; Locompass</h1>
+  <p>Point an arrow at your nearby friends using UWB. Open this page in <strong>Safari</strong> and tap install.</p>
+  <a class="btn" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fdseif0x.github.io%2Flocompass%2Fmanifest.plist">Install Locompass</a>
+  <p class="hint">Your device must be registered in the ad-hoc profile — send your UDID to Dan first.
+  After tapping, confirm the prompt and check your home screen; the icon appears there while installing.</p>
+</body>
+</html>
