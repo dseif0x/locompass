@@ -3,9 +3,27 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var vm: CompassViewModel
     @ObservedObject private var log = Log.shared
+    @State private var nameDraft = ""
 
     var body: some View {
         List {
+            Section("Your name") {
+                HStack {
+                    TextField("Your name", text: $nameDraft)
+                        .submitLabel(.done)
+                        .onSubmit { vm.setDisplayName(nameDraft) }
+                    Button {
+                        nameDraft = NameGenerator.random()
+                        vm.setDisplayName(nameDraft)
+                    } label: {
+                        Image(systemName: "dice")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Text("This is how friends see you. Changing it reconnects and starts a fresh identity — old chats and last-seen entries stay under the previous name.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
             Section("Location") {
                 LabeledContent("Authorization", value: vm.locationAuthDescription)
                 Button("Request \"Always\" access") { vm.requestAlwaysLocation() }
@@ -34,5 +52,6 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { nameDraft = vm.displayName }
     }
 }

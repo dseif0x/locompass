@@ -52,8 +52,13 @@ final class CompassViewModel: NSObject, ObservableObject {
     private var started = false
 
     override init() {
-        let storedName = UserDefaults.standard.string(forKey: Self.nameKey)
-        let name = storedName ?? UIDevice.current.name
+        let name: String
+        if let stored = UserDefaults.standard.string(forKey: Self.nameKey) {
+            name = stored
+        } else {
+            name = NameGenerator.random()
+            UserDefaults.standard.set(name, forKey: Self.nameKey) // stable across launches
+        }
         displayName = name
         findableMode = UserDefaults.standard.bool(forKey: Self.findableKey)
         if let data = UserDefaults.standard.data(forKey: Self.knownKey),

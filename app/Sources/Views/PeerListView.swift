@@ -2,14 +2,15 @@ import SwiftUI
 
 struct PeerListView: View {
     @EnvironmentObject var vm: CompassViewModel
-    @State private var nameDraft = ""
 
     var body: some View {
         List {
             Section("You") {
-                TextField("Your name", text: $nameDraft)
-                    .submitLabel(.done)
-                    .onSubmit { vm.setDisplayName(nameDraft) }
+                HStack {
+                    Text("Your name")
+                    Spacer()
+                    Text(vm.displayName).foregroundStyle(.secondary)
+                }
                 Toggle("Findable while locked", isOn: $vm.findableMode)
                 if vm.findableMode {
                     Text("Friends can find you while this phone is locked — as long as Locompass stays open in the background. Don't swipe it away.")
@@ -56,7 +57,6 @@ struct PeerListView: View {
                 }
             }
         }
-        .onAppear { nameDraft = vm.displayName }
     }
 
     private func seenText(_ p: KnownPerson) -> String {
