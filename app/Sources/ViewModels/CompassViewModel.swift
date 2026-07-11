@@ -46,6 +46,7 @@ final class CompassViewModel: NSObject, ObservableObject {
     private let location = LocationManager()
     private let beacon = FindableBeacon()
     private let scanner = FindableScanner()
+    private let liveActivity = LiveActivityController()
 
     private var peerIDs: [String: MCPeerID] = [:] // key -> MCPeerID for sending
     private var myCoord: CLLocationCoordinate2D?
@@ -88,6 +89,7 @@ final class CompassViewModel: NSObject, ObservableObject {
         location.onHeading = { [weak self] h in
             self?.myHeading = h
             self?.objectWillChange.send()  // refresh GPS arrow
+            self?.pushLiveActivity()
         }
         location.onAuth = { [weak self] s in
             self?.locationAuthDescription = LocationManager.describe(s)
@@ -405,6 +407,8 @@ final class CompassViewModel: NSObject, ObservableObject {
         Log.add("app", "navigating to \(name)")
         activePersonName = name
         startUWBIfPossible(for: name)
+        liveActivity.start(friend: name)
+        pushLiveActivity()
     }
     private func startUWBIfPossible(for name: String) {
         guard let mp = peers.first(where: { $0.name == name && $0.kind == .mpc && $0.connected })
@@ -417,6 +421,18 @@ final class CompassViewModel: NSObject, ObservableObject {
             for p in peers where p.name == name && p.kind == .mpc { ni.stop(peerKey: p.id) }
         }
         activePersonName = nil
+        liveActivity.end()
+    }
+
+    /// Mirror the current compass state to the Live Activity (lock screen,
+    /// Dynamic Island, and Apple Watch Smart Stack).
+    private func pushLiveActivity() {
+        guard let name = activePersonName else { return }
+        let n = nav(for: name)
+        liveActivity.update(
+            angle: n.angle,
+            distanceText: n.distance.map { String(format: "%.0f m", $0) } ?? "…",
+            sourceText: n.usingLabel)
     }
 
     // MARK: GPS
@@ -452,6 +468,7 @@ final class CompassViewModel: NSObject, ObservableObject {
                 peers[i].source = .gps
             }
         }
+        pushLiveActivity()
     }
 
     // MARK: helpers
@@ -523,6 +540,7 @@ extension CompassViewModel: NearbyInteractionManagerDelegate {
             peers[i].lastUWB = nil
             peers[i].source = peers[i].absBearing != nil ? .gps : .none
         }
+        pushLiveActivity()
     }
 }
 

@@ -6,7 +6,7 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: "1.10"
+    MARKETING_VERSION: "1.11"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Locompass:
@@ -15,6 +15,9 @@ targets:
     sources:
       - Sources
       - Assets.xcassets
+    dependencies:
+      - target: LocompassWidgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.locompass
@@ -23,3 +26,18 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
+  LocompassWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.1"
+    sources:
+      - Widgets
+      - Sources/Models/NavActivity.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.locompass.widgets
+        INFOPLIST_FILE: Widgets/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        SKIP_INSTALL: YES

@@ -14,6 +14,9 @@
     <key>UISupportedInterfaceOrientations</key>
     <array><string>UIInterfaceOrientationPortrait</string></array>
 
+    <key>NSSupportsLiveActivities</key><true/>
+    <key>NSSupportsLiveActivitiesFrequentUpdates</key><true/>
+
     <key>NSNearbyInteractionUsageDescription</key>
     <string>Used to point an arrow toward your nearby friends.</string>
     <key>NSLocationWhenInUseUsageDescription</key>

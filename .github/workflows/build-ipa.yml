@@ -116,7 +116,8 @@ jobs:
         working-directory: app
         run: |
           APP=build/Locompass.xcarchive/Products/Applications/Locompass.app
-          cp Signing/Locompass_AdHoc.mobileprovision "$APP/embedded.mobileprovision"
+          APPEX="$APP/PlugIns/LocompassWidgets.appex"
+          IDENTITY="Apple Distribution: Daniel Seifert (T249M66CSD)"
           cat > "$RUNNER_TEMP/entitlements.plist" <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -135,11 +136,30 @@ jobs:
           </dict>
           </plist>
           EOF
-          codesign --force \
-            --sign "Apple Distribution: Daniel Seifert (T249M66CSD)" \
-            --entitlements "$RUNNER_TEMP/entitlements.plist" \
-            "$APP"
-          codesign --verify --verbose=2 "$APP"
+          cat > "$RUNNER_TEMP/entitlements-widgets.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>application-identifier</key>
+              <string>T249M66CSD.com.example.locompass.widgets</string>
+              <key>com.apple.developer.team-identifier</key>
+              <string>T249M66CSD</string>
+              <key>get-task-allow</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+          # Sign nested code first, then the app.
+          if [ -d "$APPEX" ]; then
+            cp Signing/Locompass_AdHoc.mobileprovision "$APPEX/embedded.mobileprovision"
+            codesign --force --sign "$IDENTITY" \
+              --entitlements "$RUNNER_TEMP/entitlements-widgets.plist" "$APPEX"
+          fi
+          cp Signing/Locompass_AdHoc.mobileprovision "$APP/embedded.mobileprovision"
+          codesign --force --sign "$IDENTITY" \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
           mkdir -p build/signed/Payload
           cp -R "$APP" build/signed/Payload/
           (cd build/signed && zip -qr ../Locompass.ipa Payload)
