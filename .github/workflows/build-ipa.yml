@@ -30,6 +30,14 @@ jobs:
             archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
+      - name: Verify app bundle
+        working-directory: app
+        run: |
+          APP=build/CompassFriends.xcarchive/Products/Applications/CompassFriends.app
+          plutil -p "$APP/Info.plist"
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          test -f "$APP/$EXEC" || { echo "::error::CFBundleExecutable '$EXEC' not found in bundle"; exit 1; }
+
       - name: Package unsigned IPA
         working-directory: app
         run: |
