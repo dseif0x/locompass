@@ -29,7 +29,7 @@ struct PeerListView: View {
 
             if !vm.known.isEmpty {
                 Section("Last seen") {
-                    ForEach(vm.known) { person in
+                    ForEach(vm.knownSorted) { person in
                         NavigationLink { PersonMapView(name: person.name) } label: {
                             HStack {
                                 Image(systemName: "mappin.circle")
@@ -40,7 +40,10 @@ struct PeerListView: View {
                             }
                         }
                     }
-                    .onDelete { vm.forget(at: $0) }
+                    .onDelete { offsets in
+                        let sorted = vm.knownSorted
+                        vm.forget(names: offsets.map { sorted[$0].name })
+                    }
                 }
             }
         }

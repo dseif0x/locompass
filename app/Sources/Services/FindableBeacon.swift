@@ -27,7 +27,9 @@ final class FindableBeacon: NSObject {
         self.displayName = displayName
         active = true
         if manager == nil {
-            manager = CBPeripheralManager(delegate: self, queue: nil)
+            manager = CBPeripheralManager(
+                delegate: self, queue: nil,
+                options: [CBPeripheralManagerOptionRestoreIdentifierKey: "locompass.beacon"])
         } else {
             setup()
         }
@@ -106,6 +108,13 @@ struct BeaconLocation: Codable {
 }
 
 extension FindableBeacon: CBPeripheralManagerDelegate {
+    func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
+        // iOS relaunched us after a system kill; didUpdateState → setup()
+        // re-adds the service and re-advertises.
+        Log.add("beacon", "state restored by iOS after background kill")
+        active = true
+    }
+
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
         Log.add("beacon", "bluetooth state: \(peripheral.state.rawValue) (\(peripheral.state == .poweredOn ? "on" : "not ready"))")
         if peripheral.state == .poweredOn { setup() }

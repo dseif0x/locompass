@@ -25,7 +25,9 @@ final class FindableScanner: NSObject {
 
     func start() {
         if central == nil {
-            central = CBCentralManager(delegate: self, queue: nil)
+            central = CBCentralManager(
+                delegate: self, queue: nil,
+                options: [CBCentralManagerOptionRestoreIdentifierKey: "locompass.scanner"])
         } else {
             scan()
         }
@@ -66,6 +68,16 @@ final class FindableScanner: NSObject {
 }
 
 extension FindableScanner: CBCentralManagerDelegate {
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        Log.add("scan", "state restored by iOS after background kill")
+        if let restored = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] {
+            for p in restored {
+                peripherals[p.identifier] = p
+                p.delegate = self
+            }
+        }
+    }
+
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Log.add("scan", "bluetooth state: \(central.state.rawValue) (\(central.state == .poweredOn ? "on" : "not ready"))")
         if central.state == .poweredOn { scan() }

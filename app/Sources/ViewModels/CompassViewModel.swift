@@ -14,6 +14,8 @@ struct PeerLocationInfo {
 
 @MainActor
 final class CompassViewModel: NSObject, ObservableObject {
+    static let shared = CompassViewModel()
+
     private static let nameKey = "displayName"
     private static let findableKey = "findableMode"
     private static let knownKey = "knownPeople"
@@ -106,6 +108,21 @@ final class CompassViewModel: NSObject, ObservableObject {
                 Log.add("app", message)
             }
         }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                       object: nil, queue: .main) { [weak self] _ in
+            self?.refreshConnectivity()
+        }
+    }
+
+    /// MPC browsers/advertisers go stale after time in the background —
+    /// restart discovery and drop unconnected entries so nobody sits on
+    /// "connecting…" forever after re-entering the app.
+    private func refreshConnectivity() {
+        guard started else { return }
+        Log.add("app", "foreground refresh: restarting discovery, pruning stale peers")
+        peers.removeAll { $0.kind == .mpc && !$0.connected }
+        mpc.restartDiscovery()
+        scanner.start()
     }
 
     func start() {
@@ -177,8 +194,20 @@ final class CompassViewModel: NSObject, ObservableObject {
         peers.contains { $0.name == name && $0.connected }
     }
 
-    func forget(at offsets: IndexSet) {
-        known.remove(atOffsets: offsets)
+    /// Stable ordering for lists: live friends first (alphabetical — their
+    /// seenAt updates every second and would shuffle), then stale ones by
+    /// frozen last-seen time.
+    var knownSorted: [KnownPerson] {
+        known.sorted { a, b in
+            let aLive = isLive(a.name), bLive = isLive(b.name)
+            if aLive != bLive { return aLive }
+            if aLive { return a.name < b.name }
+            return a.seenAt > b.seenAt
+        }
+    }
+
+    func forget(names: [String]) {
+        known.removeAll { names.contains($0.name) }
         persistKnown(force: true)
     }
 
@@ -192,7 +221,6 @@ final class CompassViewModel: NSObject, ObservableObject {
         } else {
             known.append(KnownPerson(name: clean, lat: lat, lon: lon, seenAt: Date()))
         }
-        known.sort { $0.seenAt > $1.seenAt }
         persistKnown()
     }
     private func persistKnown(force: Bool = false) {

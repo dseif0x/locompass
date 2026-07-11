@@ -35,6 +35,13 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
         manager.allowsBackgroundLocationUpdates = enabled
         manager.pausesLocationUpdatesAutomatically = !enabled
         manager.showsBackgroundLocationIndicator = true
+        // Significant-change monitoring relaunches the app when the device
+        // moves a few hundred meters — even after the user swiped it away.
+        if enabled {
+            manager.startMonitoringSignificantLocationChanges()
+        } else {
+            manager.stopMonitoringSignificantLocationChanges()
+        }
     }
 
     static func describe(_ s: CLAuthorizationStatus) -> String {

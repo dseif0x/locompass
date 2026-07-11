@@ -47,6 +47,19 @@ final class MultipeerService: NSObject {
         }
     }
 
+    /// Kick stale Bonjour state after time in the background: restart
+    /// advertising + browsing (the session and its connected peers survive).
+    func restartDiscovery() {
+        Log.add("mpc", "restarting discovery")
+        advertiser.stopAdvertisingPeer()
+        browser.stopBrowsingForPeers()
+        discovered.removeAll()
+        firstSeen.removeAll()
+        lastInvite.removeAll()
+        advertiser.startAdvertisingPeer()
+        browser.startBrowsingForPeers()
+    }
+
     func stop() {
         Log.add("mpc", "stop")
         retryTimer?.invalidate()

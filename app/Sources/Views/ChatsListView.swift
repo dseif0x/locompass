@@ -7,7 +7,7 @@ struct ChatsListView: View {
         let convos = vm.chats.keys.sorted {
             (vm.chats[$0]?.last?.ts ?? .distantPast) > (vm.chats[$1]?.last?.ts ?? .distantPast)
         }
-        let others = vm.known.map(\.name).filter { !vm.chats.keys.contains($0) }
+        let others = vm.knownSorted.map(\.name).filter { !vm.chats.keys.contains($0) }
         return convos + others
     }
 
