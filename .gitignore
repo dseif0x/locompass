@@ -1,0 +1,5 @@
+.DS_Store
+app/CompassFriends.xcodeproj/
+app/build/
+DerivedData/
+*.xcuserstate
