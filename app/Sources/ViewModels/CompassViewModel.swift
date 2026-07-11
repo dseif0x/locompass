@@ -18,7 +18,7 @@ final class CompassViewModel: NSObject, ObservableObject {
     private static let knownKey = "knownPeople"
 
     @Published var peers: [Peer] = []
-    @Published var activePeerKey: String?
+    @Published var activePersonName: String?
     @Published var uwbSupported = NearbyInteractionManager.isSupported
     @Published private(set) var known: [KnownPerson] = []
     @Published private(set) var locationAuthDescription = "not determined"
@@ -173,24 +173,86 @@ final class CompassViewModel: NSObject, ObservableObject {
         }
     }
 
-    // MARK: navigation
-    func startNavigating(to key: String) {
-        activePeerKey = key
-        guard let peer = peers.first(where: { $0.id == key }) else { return }
-        if peer.kind == .mpc {
-            if uwbSupported { ni.start(peerKey: key) } // emits our token via delegate
-            sendLocation(to: key)
+    // MARK: people (merged transports)
+    var people: [Person] {
+        var byName: [String: Person] = [:]
+        var order: [String] = []
+        for p in peers {
+            if byName[p.name] == nil {
+                byName[p.name] = Person(name: p.name)
+                order.append(p.name)
+            }
+            if p.kind == .mpc { byName[p.name]?.mpc = p } else { byName[p.name]?.ble = p }
+        }
+        return order.compactMap { byName[$0] }.sorted { l, r in
+            if l.connected != r.connected { return l.connected }
+            return l.name < r.name
         }
     }
+
+    /// Best available navigation data for a person: fresh UWB wins, then GPS
+    /// (over either transport), with a label saying what's in use.
+    func nav(for name: String) -> PersonNav {
+        let mpcPeer = peers.first { $0.name == name && $0.kind == .mpc && $0.connected }
+        let blePeer = peers.first { $0.name == name && $0.kind == .ble && $0.connected }
+        let uwbFresh = mpcPeer?.lastUWB.map { Date().timeIntervalSince($0) < 3 } ?? false
+
+        var absBearing: Double?
+        var gpsDistance: Float?
+        if let k = known.first(where: { $0.name == name }), let lat = k.lat, let lon = k.lon,
+           let me = myCoord {
+            let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            absBearing = Geo.bearing(from: me, to: c)
+            gpsDistance = Float(Geo.distance(from: me, to: c))
+        }
+
+        if uwbFresh, let mp = mpcPeer {
+            if let dir = mp.uwbDirection {
+                return PersonNav(distance: mp.distance, angle: Geo.azimuthDegrees(dir),
+                                 source: .uwb, usingLabel: "Precise (UWB)", rssi: blePeer?.rssi)
+            }
+            if let b = absBearing {
+                return PersonNav(distance: mp.distance, angle: b - myHeading,
+                                 source: .uwb, usingLabel: "UWB distance · GPS arrow", rssi: blePeer?.rssi)
+            }
+            return PersonNav(distance: mp.distance, angle: nil,
+                             source: .uwb, usingLabel: "UWB distance — sweep for direction", rssi: blePeer?.rssi)
+        }
+        if let b = absBearing {
+            let label = (mpcPeer == nil && blePeer != nil) ? "GPS · via Bluetooth beacon" : "GPS (approximate)"
+            return PersonNav(distance: gpsDistance, angle: b - myHeading,
+                             source: .gps, usingLabel: label, rssi: blePeer?.rssi)
+        }
+        return PersonNav(distance: nil, angle: nil, source: .none,
+                         usingLabel: "Acquiring…", rssi: blePeer?.rssi)
+    }
+
+    // MARK: navigation
+    func startNavigating(toPerson name: String) {
+        Log.add("app", "navigating to \(name)")
+        activePersonName = name
+        startUWBIfPossible(for: name)
+    }
+    private func startUWBIfPossible(for name: String) {
+        guard let mp = peers.first(where: { $0.name == name && $0.kind == .mpc && $0.connected })
+        else { return }
+        if uwbSupported { ni.start(peerKey: mp.id) } // emits our token via delegate
+        sendLocation(to: mp.id)
+    }
     func stopNavigating() {
-        if let k = activePeerKey { ni.stop(peerKey: k) }
-        activePeerKey = nil
+        if let name = activePersonName {
+            for p in peers where p.name == name && p.kind == .mpc { ni.stop(peerKey: p.id) }
+        }
+        activePersonName = nil
     }
 
     // MARK: GPS
     private func handleMyLocation(_ c: CLLocationCoordinate2D) {
         myCoord = c
-        if let k = activePeerKey { sendLocation(to: k) }
+        if let name = activePersonName,
+           let mp = peers.first(where: { $0.name == name && $0.kind == .mpc && $0.connected }) {
+            sendLocation(to: mp.id)
+        }
         if findableMode { beacon.update(lat: c.latitude, lon: c.longitude) }
         recomputeBearings()
     }
@@ -217,13 +279,6 @@ final class CompassViewModel: NSObject, ObservableObject {
                 peers[i].source = .gps
             }
         }
-    }
-
-    // MARK: arrow
-    func arrowAngle(for peer: Peer) -> Double? {
-        if let dir = peer.uwbDirection { return Geo.azimuthDegrees(dir) }
-        if let bearing = peer.absBearing { return bearing - myHeading }
-        return nil
     }
 
     // MARK: helpers
@@ -254,6 +309,10 @@ extension CompassViewModel: MultipeerServiceDelegate {
         upsert(peerID, connected: connected)
         if connected {
             remember(name: pretty(peerID.displayName))
+            // If we're already on this person's compass screen, kick off UWB now.
+            if pretty(peerID.displayName) == activePersonName {
+                startUWBIfPossible(for: pretty(peerID.displayName))
+            }
         } else {
             ni.stop(peerKey: peerID.displayName)
         }

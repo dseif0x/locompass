@@ -4,9 +4,6 @@ struct PeerListView: View {
     @EnvironmentObject var vm: CompassViewModel
     @State private var nameDraft = ""
 
-    private var mpcPeers: [Peer] { vm.peers.filter { $0.kind == .mpc } }
-    private var blePeers: [Peer] { vm.peers.filter { $0.kind == .ble } }
-
     var body: some View {
         List {
             Section("You") {
@@ -28,29 +25,17 @@ struct PeerListView: View {
                 }
             }
 
-            Section("Nearby (precise)") {
-                ForEach(mpcPeers) { peer in
-                    if peer.connected {
-                        NavigationLink { CompassView(peerID: peer.id) } label: { row(peer) }
+            Section("Friends nearby") {
+                ForEach(vm.people) { person in
+                    if person.connected {
+                        NavigationLink { CompassView(name: person.name) } label: { row(person) }
                     } else {
-                        row(peer).foregroundStyle(.secondary)
+                        row(person).foregroundStyle(.secondary)
                     }
                 }
-                if mpcPeers.isEmpty {
-                    Text("Looking for friends nearby… both phones need the app open in the foreground.")
+                if vm.people.isEmpty {
+                    Text("Looking for friends… they need the app open (or findable mode on).")
                         .foregroundStyle(.secondary)
-                }
-            }
-
-            if !blePeers.isEmpty {
-                Section("Findable friends (their phone can be locked)") {
-                    ForEach(blePeers) { peer in
-                        if peer.connected {
-                            NavigationLink { CompassView(peerID: peer.id) } label: { row(peer) }
-                        } else {
-                            row(peer).foregroundStyle(.secondary)
-                        }
-                    }
                 }
             }
 
@@ -84,14 +69,22 @@ struct PeerListView: View {
         return RelativeDateTimeFormatter().localizedString(for: p.seenAt, relativeTo: Date())
     }
 
-    private func row(_ peer: Peer) -> some View {
+    private func row(_ person: Person) -> some View {
         HStack {
-            Circle().fill(peer.connected ? .green : .gray).frame(width: 8, height: 8)
-            Text(peer.name)
+            Circle().fill(person.connected ? .green : .gray).frame(width: 8, height: 8)
+            Text(person.name)
             Spacer()
-            if !peer.connected {
+            if person.mpc?.connected == true {
+                Image(systemName: "wifi") // local link: UWB-capable
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if person.ble?.connected == true {
+                Image(systemName: "antenna.radiowaves.left.and.right") // findable beacon
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !person.connected {
                 Text("connecting…").font(.footnote).foregroundStyle(.secondary)
-            } else if let d = peer.distance {
+            } else if let d = vm.nav(for: person.name).distance {
                 Text(String(format: "%.0f m", d)).foregroundStyle(.secondary)
             }
         }
