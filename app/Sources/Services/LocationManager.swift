@@ -28,6 +28,23 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
         manager.requestAlwaysAuthorization()
     }
 
+    /// Power profile: full precision at 1 Hz while the app is open (the
+    /// compass needs it), coarse + distance-filtered in the background so a
+    /// stationary phone lets the GPS engine idle. Movement of ~15 m still
+    /// produces a fresh fix for seekers within seconds.
+    func setProfile(background: Bool) {
+        if background {
+            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.distanceFilter = 15
+            manager.stopUpdatingHeading()
+        } else {
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.distanceFilter = kCLDistanceFilterNone
+            if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
+        }
+        Log.add("loc", "power profile: \(background ? "background (10m accuracy, 15m filter)" : "foreground (best, 1Hz)")")
+    }
+
     /// Keep GPS updates flowing while the app is backgrounded / the phone is
     /// locked (findable mode). Requires the "location" background mode.
     func setBackgroundUpdates(_ enabled: Bool) {

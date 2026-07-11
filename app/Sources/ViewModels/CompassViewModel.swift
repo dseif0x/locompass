@@ -112,7 +112,12 @@ final class CompassViewModel: NSObject, ObservableObject {
         }
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification,
                        object: nil, queue: .main) { [weak self] _ in
+            self?.location.setProfile(background: false)
             self?.refreshConnectivity()
+        }
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                       object: nil, queue: .main) { [weak self] _ in
+            self?.location.setProfile(background: true)
         }
     }
 
@@ -132,6 +137,8 @@ final class CompassViewModel: NSObject, ObservableObject {
         started = true
         mpc.start()
         location.start()
+        // Background relaunches (significant location change) start us headless.
+        location.setProfile(background: UIApplication.shared.applicationState == .background)
         scanner.start()
         updateBeacon()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { ok, _ in
