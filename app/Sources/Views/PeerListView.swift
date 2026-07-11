@@ -56,11 +56,6 @@ struct PeerListView: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
-            }
-        }
         .onAppear { nameDraft = vm.displayName }
     }
 
