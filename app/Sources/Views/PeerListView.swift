@@ -5,19 +5,6 @@ struct PeerListView: View {
 
     var body: some View {
         List {
-            Section("You") {
-                HStack {
-                    Text("Your name")
-                    Spacer()
-                    Text(vm.displayName).foregroundStyle(.secondary)
-                }
-                Toggle("Findable while locked", isOn: $vm.findableMode)
-                if vm.findableMode {
-                    Text("Friends can find you while this phone is locked — as long as Locompass stays open in the background. Don't swipe it away.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-
             if !vm.uwbSupported {
                 Section {
                     Label("This device has no UWB — GPS arrow only.",

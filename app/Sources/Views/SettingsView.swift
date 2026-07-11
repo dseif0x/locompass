@@ -24,6 +24,12 @@ struct SettingsView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
+            Section("Findable") {
+                Toggle("Findable while locked", isOn: $vm.findableMode)
+                Text("Friends can find and message you while this phone is locked — as long as Locompass stays open in the background. Don't swipe it away.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
             Section("Location") {
                 LabeledContent("Authorization", value: vm.locationAuthDescription)
                 Button("Request \"Always\" access") { vm.requestAlwaysLocation() }
