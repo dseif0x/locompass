@@ -30,7 +30,7 @@ struct PeerListView: View {
             if !vm.known.isEmpty {
                 Section("Last seen") {
                     ForEach(vm.knownSorted) { person in
-                        NavigationLink { PersonMapView(name: person.name) } label: {
+                        NavigationLink { CompassView(name: person.name) } label: {
                             HStack {
                                 Image(systemName: "mappin.circle")
                                     .foregroundStyle(person.lat != nil ? Color.blue : Color.secondary)

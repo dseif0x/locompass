@@ -277,7 +277,20 @@ final class CompassViewModel: NSObject, ObservableObject {
                              source: .uwb, usingLabel: "UWB distance — sweep for direction", rssi: blePeer?.rssi)
         }
         if let b = absBearing {
-            let label = (mpcPeer == nil && blePeer != nil) ? "GPS · via Bluetooth beacon" : "GPS (approximate)"
+            let label: String
+            if mpcPeer == nil && blePeer == nil {
+                // Offline: navigate to where they last were.
+                if let seen = known.first(where: { $0.name == name })?.seenAt {
+                    let rel = RelativeDateTimeFormatter().localizedString(for: seen, relativeTo: Date())
+                    label = "Not connected · last seen \(rel)"
+                } else {
+                    label = "Not connected · last known position"
+                }
+            } else if mpcPeer == nil && blePeer != nil {
+                label = "GPS · via Bluetooth beacon"
+            } else {
+                label = "GPS (approximate)"
+            }
             return PersonNav(distance: gpsDistance, angle: b - myHeading,
                              source: .gps, usingLabel: label, rssi: blePeer?.rssi)
         }

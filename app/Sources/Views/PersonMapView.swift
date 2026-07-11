@@ -9,16 +9,8 @@ import CoreLocation
 struct PersonMapView: View {
     let name: String
     @EnvironmentObject var vm: CompassViewModel
-
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
-        latitudinalMeters: 600, longitudinalMeters: 600)
-    @State private var didCenter = false
-
-    private struct Pin: Identifiable {
-        let id = "pin"
-        let coord: CLLocationCoordinate2D
-    }
+    @AppStorage("mapTypeRaw") private var mapTypeRaw = 0
+    @State private var fitTrigger = 0
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { _ in
@@ -31,15 +23,14 @@ struct PersonMapView: View {
     @ViewBuilder private var content: some View {
         if let info = vm.lastLocation(for: name) {
             VStack(spacing: 0) {
-                Map(coordinateRegion: $region, showsUserLocation: true,
-                    annotationItems: [Pin(coord: info.coordinate)]) { pin in
-                    MapMarker(coordinate: pin.coord, tint: .blue)
-                }
-                .onAppear {
-                    if !didCenter {
-                        didCenter = true
-                        center(on: info.coordinate)
-                    }
+                ZStack(alignment: .top) {
+                    MapKitView(
+                        pins: [FriendMapPin(name: name, coordinate: info.coordinate,
+                                            live: info.live, subtitle: timeText(info))],
+                        mapTypeRaw: mapTypeRaw,
+                        fitTrigger: $fitTrigger)
+                    MapTypePicker(raw: $mapTypeRaw)
+                        .padding(.top, 8)
                 }
 
                 VStack(spacing: 6) {
@@ -49,7 +40,7 @@ struct PersonMapView: View {
                         Text(String(format: "%.0f m from you", Geo.distance(from: me, to: info.coordinate)))
                             .font(.footnote).foregroundStyle(.secondary)
                     }
-                    Button("Center on \(name)") { center(on: info.coordinate) }
+                    Button("Center on \(name)") { fitTrigger += 1 }
                         .font(.footnote)
                     Text("No internet? The map may be blank — the marker and distance still work.")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -66,10 +57,6 @@ struct PersonMapView: View {
             }
             .padding()
         }
-    }
-
-    private func center(on c: CLLocationCoordinate2D) {
-        region = MKCoordinateRegion(center: c, latitudinalMeters: 600, longitudinalMeters: 600)
     }
 
     private func timeText(_ info: PeerLocationInfo) -> String {
