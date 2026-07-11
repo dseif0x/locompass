@@ -48,6 +48,15 @@ struct CompassView: View {
         .padding()
         .navigationTitle("Navigate")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink {
+                    PersonMapView(name: peer?.name ?? "")
+                } label: {
+                    Image(systemName: "map")
+                }
+            }
+        }
         .onAppear {
             vm.startNavigating(to: peerID)
             UIApplication.shared.isIdleTimerDisabled = true

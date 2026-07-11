@@ -18,6 +18,11 @@ final class MultipeerService: NSObject {
     private let browser: MCNearbyServiceBrowser
     weak var delegate: MultipeerServiceDelegate?
 
+    private var discovered: [MCPeerID] = []
+    private var firstSeen: [MCPeerID: Date] = [:]
+    private var lastInvite: [MCPeerID: Date] = [:]
+    private var retryTimer: Timer?
+
     var connectedPeers: [MCPeerID] { session.connectedPeers }
 
     init(displayName: String) {
@@ -34,55 +39,125 @@ final class MultipeerService: NSObject {
     }
 
     func start() {
+        Log.add("mpc", "start as \(myPeerID.displayName)")
         advertiser.startAdvertisingPeer()
         browser.startBrowsingForPeers()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.retryStalledInvites()
+        }
     }
 
     func stop() {
+        Log.add("mpc", "stop")
+        retryTimer?.invalidate()
+        retryTimer = nil
         advertiser.stopAdvertisingPeer()
         browser.stopBrowsingForPeers()
         session.disconnect()
+        discovered.removeAll()
+        firstSeen.removeAll()
+        lastInvite.removeAll()
     }
 
     func send(_ message: PeerMessage, to peerID: MCPeerID) {
         guard session.connectedPeers.contains(peerID),
               let data = try? JSONEncoder().encode(message) else { return }
-        try? session.send(data, toPeers: [peerID], with: .reliable)
+        do {
+            try session.send(data, toPeers: [peerID], with: .reliable)
+        } catch {
+            Log.add("mpc", "send to \(peerID.displayName) failed: \(error.localizedDescription)")
+        }
+    }
+
+    // The lexicographically-lower name is the designated inviter, which avoids
+    // the both-sides-invite race. The higher side still invites as a fallback
+    // when nothing has connected for a while — sometimes only one phone's
+    // browser ever reports the peer.
+    private func isDesignatedInviter(for peerID: MCPeerID) -> Bool {
+        myPeerID.displayName < peerID.displayName
+    }
+
+    private func invite(_ peerID: MCPeerID, reason: String) {
+        lastInvite[peerID] = Date()
+        Log.add("mpc", "inviting \(peerID.displayName) (\(reason))")
+        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 20)
+    }
+
+    private func retryStalledInvites() {
+        for peerID in discovered where !session.connectedPeers.contains(peerID) {
+            let sinceInvite = Date().timeIntervalSince(lastInvite[peerID] ?? .distantPast)
+            guard sinceInvite > 25 else { continue }
+            if isDesignatedInviter(for: peerID) {
+                invite(peerID, reason: "retry")
+            } else if Date().timeIntervalSince(firstSeen[peerID] ?? Date()) > 30 {
+                invite(peerID, reason: "fallback — peer never connected to us")
+            }
+        }
     }
 }
 
 extension MultipeerService: MCNearbyServiceBrowserDelegate {
     func browser(_ b: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID,
                  withDiscoveryInfo info: [String: String]?) {
-        delegate?.multipeer(self, didDiscover: peerID)
-        // Only the lexicographically-lower name initiates, to avoid double invites.
-        if myPeerID.displayName < peerID.displayName {
-            b.invitePeer(peerID, to: session, withContext: nil, timeout: 30)
+        DispatchQueue.main.async {
+            Log.add("mpc", "found \(peerID.displayName)")
+            if !self.discovered.contains(peerID) { self.discovered.append(peerID) }
+            if self.firstSeen[peerID] == nil { self.firstSeen[peerID] = Date() }
+            self.delegate?.multipeer(self, didDiscover: peerID)
+            if self.isDesignatedInviter(for: peerID) {
+                self.invite(peerID, reason: "discovered")
+            }
         }
     }
     func browser(_ b: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        delegate?.multipeer(self, didLose: peerID)
+        DispatchQueue.main.async {
+            Log.add("mpc", "lost \(peerID.displayName)")
+            self.discovered.removeAll { $0 == peerID }
+            self.firstSeen[peerID] = nil
+            self.lastInvite[peerID] = nil
+            self.delegate?.multipeer(self, didLose: peerID)
+        }
     }
     func browser(_ b: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        print("browse error:", error)
+        Log.add("mpc", "browse error: \(error.localizedDescription)")
     }
 }
 
 extension MultipeerService: MCNearbyServiceAdvertiserDelegate {
     func advertiser(_ a: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(true, session) // auto-accept (prototype)
+        Log.add("mpc", "invitation from \(peerID.displayName) — accepting")
+        invitationHandler(true, session)
+    }
+    func advertiser(_ a: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
+        Log.add("mpc", "advertise error: \(error.localizedDescription)")
     }
 }
 
 extension MultipeerService: MCSessionDelegate {
+    private func describe(_ s: MCSessionState) -> String {
+        switch s {
+        case .notConnected: return "notConnected"
+        case .connecting:   return "connecting"
+        case .connected:    return "connected"
+        @unknown default:   return "unknown(\(s.rawValue))"
+        }
+    }
+
     func session(_ s: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        Log.add("mpc", "\(peerID.displayName) → \(describe(state))")
         DispatchQueue.main.async {
+            if state == .notConnected {
+                self.lastInvite[peerID] = nil // allow a prompt re-invite
+            }
             self.delegate?.multipeer(self, peer: peerID, didChange: state == .connected)
         }
     }
     func session(_ s: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        guard let msg = try? JSONDecoder().decode(PeerMessage.self, from: data) else { return }
+        guard let msg = try? JSONDecoder().decode(PeerMessage.self, from: data) else {
+            Log.add("mpc", "undecodable message from \(peerID.displayName)")
+            return
+        }
         DispatchQueue.main.async {
             self.delegate?.multipeer(self, didReceive: msg, from: peerID)
         }

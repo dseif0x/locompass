@@ -17,7 +17,9 @@
     <key>NSNearbyInteractionUsageDescription</key>
     <string>Used to point an arrow toward your nearby friends.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Used to smooth the arrow when UWB direction is briefly lost.</string>
+    <string>Used to point the arrow toward friends and share your position with them.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Always access keeps you findable by friends while your phone is locked.</string>
 
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Used so friends can find you while your phone is locked.</string>

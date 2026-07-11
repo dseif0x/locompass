@@ -53,8 +53,35 @@ struct PeerListView: View {
                     }
                 }
             }
+
+            if !vm.known.isEmpty {
+                Section("Last seen") {
+                    ForEach(vm.known) { person in
+                        NavigationLink { PersonMapView(name: person.name) } label: {
+                            HStack {
+                                Image(systemName: "mappin.circle")
+                                    .foregroundStyle(person.lat != nil ? .red : .secondary)
+                                Text(person.name)
+                                Spacer()
+                                Text(seenText(person)).font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { vm.forget(at: $0) }
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
+            }
         }
         .onAppear { nameDraft = vm.displayName }
+    }
+
+    private func seenText(_ p: KnownPerson) -> String {
+        if vm.isLive(p.name) { return "Now" }
+        return RelativeDateTimeFormatter().localizedString(for: p.seenAt, relativeTo: Date())
     }
 
     private func row(_ peer: Peer) -> some View {

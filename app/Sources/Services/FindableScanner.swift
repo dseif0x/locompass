@@ -15,6 +15,7 @@ final class FindableScanner: NSObject {
     private var central: CBCentralManager?
     private var peripherals: [UUID: CBPeripheral] = [:]
     private var rssiTimer: Timer?
+    private var lastLocLog: [UUID: Date] = [:]
 
     func start() {
         if central == nil {
@@ -44,12 +45,14 @@ final class FindableScanner: NSObject {
 
 extension FindableScanner: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        Log.add("scan", "bluetooth state: \(central.state.rawValue) (\(central.state == .poweredOn ? "on" : "not ready"))")
         if central.state == .poweredOn { scan() }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard peripherals[peripheral.identifier] == nil else { return }
+        Log.add("scan", "found beacon \(peripheral.identifier.uuidString.prefix(8)) rssi=\(RSSI.intValue)")
         peripherals[peripheral.identifier] = peripheral // retain, or the connect is dropped
         peripheral.delegate = self
         delegate?.scanner(self, didUpdatePeer: peripheral.identifier.uuidString,
@@ -58,17 +61,20 @@ extension FindableScanner: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        Log.add("scan", "connected to \(peripheral.identifier.uuidString.prefix(8))")
         peripheral.discoverServices([FindableBeacon.serviceUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        Log.add("scan", "disconnected from \(peripheral.identifier.uuidString.prefix(8)): \(error?.localizedDescription ?? "clean")")
         delegate?.scanner(self, didLosePeer: peripheral.identifier.uuidString)
         central.connect(peripheral) // may just be a dead spot in the crowd — keep trying
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
+        Log.add("scan", "connect failed \(peripheral.identifier.uuidString.prefix(8)): \(error?.localizedDescription ?? "?")")
         peripherals[peripheral.identifier] = nil
         delegate?.scanner(self, didLosePeer: peripheral.identifier.uuidString)
     }
@@ -99,10 +105,15 @@ extension FindableScanner: CBPeripheralDelegate {
         guard let data = characteristic.value else { return }
         let id = peripheral.identifier.uuidString
         if characteristic.uuid == FindableBeacon.nameCharUUID {
-            delegate?.scanner(self, didUpdatePeer: id, name: String(data: data, encoding: .utf8),
-                              location: nil, rssi: nil)
+            let name = String(data: data, encoding: .utf8)
+            Log.add("scan", "\(id.prefix(8)) is \"\(name ?? "?")\"")
+            delegate?.scanner(self, didUpdatePeer: id, name: name, location: nil, rssi: nil)
         } else if characteristic.uuid == FindableBeacon.locCharUUID {
             let loc = try? JSONDecoder().decode(BeaconLocation.self, from: data)
+            if Date().timeIntervalSince(lastLocLog[peripheral.identifier] ?? .distantPast) > 15 {
+                lastLocLog[peripheral.identifier] = Date()
+                Log.add("scan", "\(id.prefix(8)) position update (\(loc == nil ? "undecodable" : "ok"))")
+            }
             delegate?.scanner(self, didUpdatePeer: id, name: nil, location: loc, rssi: nil)
         }
     }

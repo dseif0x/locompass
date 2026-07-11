@@ -17,6 +17,7 @@ final class FindableBeacon: NSObject {
     private var active = false
 
     func start(displayName: String) {
+        Log.add("beacon", "start as \(displayName)")
         self.displayName = displayName
         active = true
         if manager == nil {
@@ -27,6 +28,7 @@ final class FindableBeacon: NSObject {
     }
 
     func stop() {
+        Log.add("beacon", "stop")
         active = false
         manager?.stopAdvertising()
         manager?.removeAllServices()
@@ -65,7 +67,26 @@ struct BeaconLocation: Codable {
 
 extension FindableBeacon: CBPeripheralManagerDelegate {
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        Log.add("beacon", "bluetooth state: \(peripheral.state.rawValue) (\(peripheral.state == .poweredOn ? "on" : "not ready"))")
         if peripheral.state == .poweredOn { setup() }
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+        if let error { Log.add("beacon", "add service failed: \(error.localizedDescription)") }
+    }
+
+    func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
+        Log.add("beacon", error.map { "advertising failed: \($0.localizedDescription)" } ?? "advertising")
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
+                           didSubscribeTo characteristic: CBCharacteristic) {
+        Log.add("beacon", "a seeker subscribed to our position")
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
+                           didUnsubscribeFrom characteristic: CBCharacteristic) {
+        Log.add("beacon", "a seeker unsubscribed")
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
