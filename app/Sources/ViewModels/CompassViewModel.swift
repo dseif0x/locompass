@@ -274,7 +274,10 @@ final class CompassViewModel: NSObject, ObservableObject {
         }
 
         if uwbFresh, let mp = mpcPeer {
-            if let dir = mp.uwbDirection {
+            // 2s grace window: momentary direction dropouts keep the UWB arrow
+            // instead of flickering to the GPS bearing and back.
+            let dirFresh = mp.lastDirectionAt.map { Date().timeIntervalSince($0) < 2 } ?? false
+            if let dir = mp.uwbDirection, dirFresh {
                 return PersonNav(distance: mp.distance, angle: Geo.azimuthDegrees(dir),
                                  source: .uwb, usingLabel: "Precise (UWB)", rssi: blePeer?.rssi)
             }
@@ -537,7 +540,13 @@ extension CompassViewModel: NearbyInteractionManagerDelegate {
     func niManager(_ m: NearbyInteractionManager, didUpdateDistance d: Float?,
                    direction: simd_float3?, forPeer key: String) {
         guard let i = peers.firstIndex(where: { $0.id == key }) else { return }
-        peers[i].uwbDirection = direction
+        // Direction drops out momentarily whenever the peer leaves the UWB
+        // antenna's FOV (constantly, while walking). Keep the last direction
+        // instead of clearing — nav() applies a freshness window.
+        if let direction {
+            peers[i].uwbDirection = direction
+            peers[i].lastDirectionAt = Date()
+        }
         if let d {
             peers[i].distance = d
             peers[i].source = .uwb
@@ -545,6 +554,8 @@ extension CompassViewModel: NearbyInteractionManagerDelegate {
         }
         if d == nil && direction == nil { // UWB lost the peer — GPS may take over
             peers[i].lastUWB = nil
+            peers[i].uwbDirection = nil
+            peers[i].lastDirectionAt = nil
             peers[i].source = peers[i].absBearing != nil ? .gps : .none
         }
         pushLiveActivity()
