@@ -15,6 +15,12 @@ struct ContentView: View {
             .tabItem { Label("Map", systemImage: "map") }
 
             NavigationStack {
+                ChatsListView()
+            }
+            .tabItem { Label("Messages", systemImage: "message") }
+            .badge(vm.totalUnread)
+
+            NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("Settings", systemImage: "gearshape") }

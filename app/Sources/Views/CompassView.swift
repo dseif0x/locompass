@@ -46,6 +46,13 @@ struct CompassView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
+                    ChatView(name: name)
+                } label: {
+                    Image(systemName: "message")
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink {
                     PersonMapView(name: name)
                 } label: {
                     Image(systemName: "map")

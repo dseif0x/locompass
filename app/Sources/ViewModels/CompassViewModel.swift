@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import CoreLocation
 import MultipeerConnectivity
+import UserNotifications
 import simd
 
 struct PeerLocationInfo {
@@ -16,12 +17,20 @@ final class CompassViewModel: NSObject, ObservableObject {
     private static let nameKey = "displayName"
     private static let findableKey = "findableMode"
     private static let knownKey = "knownPeople"
+    private static let chatsKey = "chats"
+    private static let seenChatKey = "seenChatIds"
 
     @Published var peers: [Peer] = []
     @Published var activePersonName: String?
     @Published var uwbSupported = NearbyInteractionManager.isSupported
     @Published private(set) var known: [KnownPerson] = []
+    @Published private(set) var chats: [String: [ChatMessage]] = [:]
+    @Published private(set) var unread: [String: Int] = [:]
     @Published private(set) var locationAuthDescription = "not determined"
+    private var seenChatIds: Set<String> = []
+    private var activeChatName: String?
+    private var chatTimer: Timer?
+    var totalUnread: Int { unread.values.reduce(0, +) }
     @Published private(set) var displayName: String
     @Published var findableMode: Bool {
         didSet {
@@ -51,6 +60,13 @@ final class CompassViewModel: NSObject, ObservableObject {
            let list = try? JSONDecoder().decode([KnownPerson].self, from: data) {
             known = list
         }
+        if let data = UserDefaults.standard.data(forKey: Self.chatsKey),
+           let stored = try? JSONDecoder().decode([String: [ChatMessage]].self, from: data) {
+            chats = stored
+        }
+        if let ids = UserDefaults.standard.stringArray(forKey: Self.seenChatKey) {
+            seenChatIds = Set(ids)
+        }
         mpc = MultipeerService(displayName: name)
         super.init()
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -59,6 +75,8 @@ final class CompassViewModel: NSObject, ObservableObject {
         mpc.delegate = self
         ni.delegate = self
         scanner.delegate = self
+        scanner.myName = name
+        beacon.onChat = { [weak self] env in self?.handleEnvelope(env) }
         location.onLocation = { [weak self] c in self?.handleMyLocation(c) }
         location.onHeading = { [weak self] h in
             self?.myHeading = h
@@ -92,6 +110,12 @@ final class CompassViewModel: NSObject, ObservableObject {
         location.start()
         scanner.start()
         updateBeacon()
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { ok, _ in
+            Log.add("app", "notifications \(ok ? "granted" : "denied")")
+        }
+        chatTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            self?.retryOutbox()
+        }
     }
 
     // MARK: identity
@@ -100,6 +124,7 @@ final class CompassViewModel: NSObject, ObservableObject {
         guard !name.isEmpty, name != displayName else { return }
         Log.add("app", "display name → \(name)")
         displayName = name
+        scanner.myName = name
         UserDefaults.standard.set(name, forKey: Self.nameKey)
         rebuildMPC()
         if findableMode { beacon.start(displayName: name) } // re-advertise new name
@@ -227,6 +252,108 @@ final class CompassViewModel: NSObject, ObservableObject {
                          usingLabel: "Acquiring…", rssi: blePeer?.rssi)
     }
 
+    // MARK: chat
+    func sendChat(_ text: String, to name: String) {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        let env = ChatEnvelope(kind: .chat, id: UUID().uuidString, from: displayName,
+                               to: name, text: String(clean.prefix(300)), ts: Date())
+        chats[name, default: []].append(
+            ChatMessage(id: env.id, text: env.text ?? "", ts: env.ts, outgoing: true, acked: false))
+        persistChats()
+        Log.add("chat", "queued message to \(name)")
+        deliver(env)
+    }
+
+    func openChat(_ name: String) {
+        activeChatName = name
+        unread[name] = 0
+    }
+    func closeChat(_ name: String) {
+        if activeChatName == name { activeChatName = nil }
+    }
+
+    /// Push an envelope over every live transport; the retry timer re-sends
+    /// unacked messages until an ack comes back.
+    private func deliver(_ env: ChatEnvelope) {
+        var sent: [String] = []
+        if let mp = peers.first(where: { $0.name == env.to && $0.kind == .mpc && $0.connected }),
+           let peerID = peerIDs[mp.id] {
+            mpc.send(PeerMessage(kind: .chat, chat: env), to: peerID)
+            sent.append("mpc")
+        }
+        if scanner.sendChat(env, toPersonNamed: env.to) { sent.append("ble-write") }
+        if findableMode {
+            beacon.enqueueChat(env) // recipient may reach us as a central
+            sent.append("beacon-queue")
+        }
+        if env.kind == .chat {
+            Log.add("chat", "deliver \(env.id.prefix(6)) to \(env.to) via [\(sent.joined(separator: ","))]")
+        }
+    }
+
+    private func retryOutbox() {
+        for (name, msgs) in chats {
+            for m in msgs where m.outgoing && !m.acked && Date().timeIntervalSince(m.ts) < 48 * 3600 {
+                deliver(ChatEnvelope(kind: .chat, id: m.id, from: displayName,
+                                     to: name, text: m.text, ts: m.ts))
+            }
+        }
+    }
+
+    private func handleEnvelope(_ env: ChatEnvelope) {
+        switch env.kind {
+        case .chat:
+            let ack = ChatEnvelope(kind: .ack, id: env.id, from: displayName,
+                                   to: env.from, text: nil, ts: Date())
+            guard !seenChatIds.contains(env.id) else {
+                deliver(ack) // duplicate — re-ack, sender may have missed it
+                return
+            }
+            seenChatIds.insert(env.id)
+            persistSeenChatIds()
+            chats[env.from, default: []].append(
+                ChatMessage(id: env.id, text: env.text ?? "", ts: env.ts, outgoing: false, acked: true))
+            if activeChatName != env.from { unread[env.from, default: 0] += 1 }
+            persistChats()
+            remember(name: env.from)
+            deliver(ack)
+            notifyIncoming(env)
+            Log.add("chat", "message from \(env.from)")
+        case .ack:
+            if var msgs = chats[env.from], let i = msgs.firstIndex(where: { $0.id == env.id && !$0.acked }) {
+                msgs[i].acked = true
+                chats[env.from] = msgs
+                persistChats()
+                Log.add("chat", "ack from \(env.from) for \(env.id.prefix(6))")
+            }
+            beacon.removePendingChat(id: env.id)
+        }
+    }
+
+    private func notifyIncoming(_ env: ChatEnvelope) {
+        guard UIApplication.shared.applicationState != .active else { return }
+        let content = UNMutableNotificationContent()
+        content.title = env.from
+        content.body = env.text ?? ""
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: env.id, content: content, trigger: nil))
+    }
+
+    private func persistChats() {
+        for (name, msgs) in chats where msgs.count > 500 {
+            chats[name] = Array(msgs.suffix(500))
+        }
+        if let data = try? JSONEncoder().encode(chats) {
+            UserDefaults.standard.set(data, forKey: Self.chatsKey)
+        }
+    }
+    private func persistSeenChatIds() {
+        if seenChatIds.count > 1000 { seenChatIds = Set(Array(seenChatIds).suffix(500)) }
+        UserDefaults.standard.set(Array(seenChatIds), forKey: Self.seenChatKey)
+    }
+
     // MARK: navigation
     func startNavigating(toPerson name: String) {
         Log.add("app", "navigating to \(name)")
@@ -326,6 +453,8 @@ extension CompassViewModel: MultipeerServiceDelegate {
                 updateGPS(for: key, lat: lat, lon: lon)
                 remember(name: pretty(key), lat: lat, lon: lon)
             }
+        case .chat:
+            if let env = message.chat { handleEnvelope(env) }
         }
     }
 }
@@ -378,5 +507,8 @@ extension CompassViewModel: FindableScannerDelegate {
             peers[i].connected = false
             peers[i].rssi = nil
         }
+    }
+    func scanner(_ s: FindableScanner, didReceiveChat env: ChatEnvelope) {
+        handleEnvelope(env)
     }
 }
