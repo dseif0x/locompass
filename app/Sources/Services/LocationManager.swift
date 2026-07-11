@@ -18,6 +18,14 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
         if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
     }
 
+    /// Keep GPS updates flowing while the app is backgrounded / the phone is
+    /// locked (findable mode). Requires the "location" background mode.
+    func setBackgroundUpdates(_ enabled: Bool) {
+        manager.allowsBackgroundLocationUpdates = enabled
+        manager.pausesLocationUpdatesAutomatically = !enabled
+        manager.showsBackgroundLocationIndicator = true
+    }
+
     func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
         if let c = locs.last?.coordinate { onLocation?(c) }
     }

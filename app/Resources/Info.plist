@@ -19,6 +19,14 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Used to smooth the arrow when UWB direction is briefly lost.</string>
 
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Used so friends can find you while your phone is locked.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-peripheral</string>
+        <string>location</string>
+    </array>
+
     <key>NSLocalNetworkUsageDescription</key>
     <string>Used to discover and connect to nearby friends.</string>
     <key>NSBonjourServices</key>

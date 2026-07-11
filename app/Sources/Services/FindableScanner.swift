@@ -1,0 +1,114 @@
+import Foundation
+import CoreBluetooth
+
+protocol FindableScannerDelegate: AnyObject {
+    func scanner(_ s: FindableScanner, didUpdatePeer id: String,
+                 name: String?, location: BeaconLocation?, rssi: Int?)
+    func scanner(_ s: FindableScanner, didLosePeer id: String)
+}
+
+/// Foreground-side counterpart of FindableBeacon: scans for friends
+/// broadcasting the Locompass service, connects, and streams their name,
+/// GPS position, and signal strength.
+final class FindableScanner: NSObject {
+    weak var delegate: FindableScannerDelegate?
+    private var central: CBCentralManager?
+    private var peripherals: [UUID: CBPeripheral] = [:]
+    private var rssiTimer: Timer?
+
+    func start() {
+        if central == nil {
+            central = CBCentralManager(delegate: self, queue: nil)
+        } else {
+            scan()
+        }
+        rssiTimer?.invalidate()
+        rssiTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.peripherals.values.forEach { if $0.state == .connected { $0.readRSSI() } }
+        }
+    }
+
+    func stop() {
+        rssiTimer?.invalidate()
+        rssiTimer = nil
+        central?.stopScan()
+        peripherals.values.forEach { central?.cancelPeripheralConnection($0) }
+        peripherals.removeAll()
+    }
+
+    private func scan() {
+        guard let central, central.state == .poweredOn else { return }
+        central.scanForPeripherals(withServices: [FindableBeacon.serviceUUID], options: nil)
+    }
+}
+
+extension FindableScanner: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn { scan() }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        guard peripherals[peripheral.identifier] == nil else { return }
+        peripherals[peripheral.identifier] = peripheral // retain, or the connect is dropped
+        peripheral.delegate = self
+        delegate?.scanner(self, didUpdatePeer: peripheral.identifier.uuidString,
+                          name: nil, location: nil, rssi: RSSI.intValue)
+        central.connect(peripheral)
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.discoverServices([FindableBeacon.serviceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
+                        error: Error?) {
+        delegate?.scanner(self, didLosePeer: peripheral.identifier.uuidString)
+        central.connect(peripheral) // may just be a dead spot in the crowd — keep trying
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
+                        error: Error?) {
+        peripherals[peripheral.identifier] = nil
+        delegate?.scanner(self, didLosePeer: peripheral.identifier.uuidString)
+    }
+}
+
+extension FindableScanner: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let service = peripheral.services?.first(where: { $0.uuid == FindableBeacon.serviceUUID })
+        else { return }
+        peripheral.discoverCharacteristics([FindableBeacon.nameCharUUID, FindableBeacon.locCharUUID],
+                                           for: service)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
+                    error: Error?) {
+        service.characteristics?.forEach { c in
+            if c.uuid == FindableBeacon.nameCharUUID {
+                peripheral.readValue(for: c)
+            } else if c.uuid == FindableBeacon.locCharUUID {
+                peripheral.setNotifyValue(true, for: c)
+                peripheral.readValue(for: c)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard let data = characteristic.value else { return }
+        let id = peripheral.identifier.uuidString
+        if characteristic.uuid == FindableBeacon.nameCharUUID {
+            delegate?.scanner(self, didUpdatePeer: id, name: String(data: data, encoding: .utf8),
+                              location: nil, rssi: nil)
+        } else if characteristic.uuid == FindableBeacon.locCharUUID {
+            let loc = try? JSONDecoder().decode(BeaconLocation.self, from: data)
+            delegate?.scanner(self, didUpdatePeer: id, name: nil, location: loc, rssi: nil)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        delegate?.scanner(self, didUpdatePeer: peripheral.identifier.uuidString,
+                          name: nil, location: nil, rssi: RSSI.intValue)
+    }
+}

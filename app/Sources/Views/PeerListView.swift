@@ -2,9 +2,24 @@ import SwiftUI
 
 struct PeerListView: View {
     @EnvironmentObject var vm: CompassViewModel
+    @State private var nameDraft = ""
+
+    private var mpcPeers: [Peer] { vm.peers.filter { $0.kind == .mpc } }
+    private var blePeers: [Peer] { vm.peers.filter { $0.kind == .ble } }
 
     var body: some View {
         List {
+            Section("You") {
+                TextField("Your name", text: $nameDraft)
+                    .submitLabel(.done)
+                    .onSubmit { vm.setDisplayName(nameDraft) }
+                Toggle("Findable while locked", isOn: $vm.findableMode)
+                if vm.findableMode {
+                    Text("Friends can find you while this phone is locked — as long as Locompass stays open in the background. Don't swipe it away.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
             if !vm.uwbSupported {
                 Section {
                     Label("This device has no UWB — GPS arrow only.",
@@ -13,20 +28,33 @@ struct PeerListView: View {
                 }
             }
 
-            Section("Nearby devices") {
-                ForEach(vm.peers) { peer in
+            Section("Nearby (precise)") {
+                ForEach(mpcPeers) { peer in
                     if peer.connected {
                         NavigationLink { CompassView(peerID: peer.id) } label: { row(peer) }
                     } else {
                         row(peer).foregroundStyle(.secondary)
                     }
                 }
-                if vm.peers.isEmpty {
-                    Text("Looking for friends nearby… make sure both phones have the app open.")
+                if mpcPeers.isEmpty {
+                    Text("Looking for friends nearby… both phones need the app open in the foreground.")
                         .foregroundStyle(.secondary)
                 }
             }
+
+            if !blePeers.isEmpty {
+                Section("Findable friends (their phone can be locked)") {
+                    ForEach(blePeers) { peer in
+                        if peer.connected {
+                            NavigationLink { CompassView(peerID: peer.id) } label: { row(peer) }
+                        } else {
+                            row(peer).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
         }
+        .onAppear { nameDraft = vm.displayName }
     }
 
     private func row(_ peer: Peer) -> some View {
@@ -37,7 +65,7 @@ struct PeerListView: View {
             if !peer.connected {
                 Text("connecting…").font(.footnote).foregroundStyle(.secondary)
             } else if let d = peer.distance {
-                Text(String(format: "%.1f m", d)).foregroundStyle(.secondary)
+                Text(String(format: "%.0f m", d)).foregroundStyle(.secondary)
             }
         }
     }

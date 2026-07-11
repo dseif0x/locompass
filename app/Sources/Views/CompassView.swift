@@ -21,19 +21,26 @@ struct CompassView: View {
                     } else {
                         VStack(spacing: 8) {
                             Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 44))
-                            Text("Sweep your phone…").foregroundStyle(.secondary)
+                            Text("Acquiring signal…").foregroundStyle(.secondary)
                         }
                     }
                 }
 
                 if let d = peer.distance {
-                    Text(String(format: "%.1f m", d))
+                    Text(String(format: "%.0f m", d))
                         .font(.system(size: 48, weight: .semibold, design: .rounded))
                 }
 
                 Label(label(peer.source),
                       systemImage: peer.source == .uwb ? "dot.radiowaves.left.and.right" : "location")
                     .font(.footnote).foregroundStyle(.secondary)
+
+                if peer.kind == .ble, let rssi = peer.rssi {
+                    let b = bars(rssi)
+                    Label("Signal \(String(repeating: "●", count: b))\(String(repeating: "○", count: 5 - b))",
+                          systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             } else {
                 ProgressView()
             }
@@ -41,8 +48,14 @@ struct CompassView: View {
         .padding()
         .navigationTitle("Navigate")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { vm.startNavigating(to: peerID) }
-        .onDisappear { vm.stopNavigating() }
+        .onAppear {
+            vm.startNavigating(to: peerID)
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            vm.stopNavigating()
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
 
     private func label(_ s: NavSource) -> String {
@@ -50,6 +63,17 @@ struct CompassView: View {
         case .uwb:  return "Precise (UWB)"
         case .gps:  return "Approximate (GPS)"
         case .none: return "Acquiring…"
+        }
+    }
+
+    /// Rough BLE signal → 1–5 bars, useful as hot/cold for the last meters.
+    private func bars(_ rssi: Int) -> Int {
+        switch rssi {
+        case (-50)...: return 5
+        case (-60)...: return 4
+        case (-70)...: return 3
+        case (-80)...: return 2
+        default:       return 1
         }
     }
 }

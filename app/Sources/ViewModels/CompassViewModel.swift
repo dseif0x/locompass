@@ -1,18 +1,31 @@
 import Foundation
 import SwiftUI
+import UIKit
 import CoreLocation
 import MultipeerConnectivity
 import simd
 
 @MainActor
 final class CompassViewModel: NSObject, ObservableObject {
+    private static let nameKey = "displayName"
+    private static let findableKey = "findableMode"
+
     @Published var peers: [Peer] = []
     @Published var activePeerKey: String?
     @Published var uwbSupported = NearbyInteractionManager.isSupported
+    @Published private(set) var displayName: String
+    @Published var findableMode: Bool {
+        didSet {
+            UserDefaults.standard.set(findableMode, forKey: Self.findableKey)
+            updateBeacon()
+        }
+    }
 
-    private let mpc = MultipeerService()
+    private var mpc: MultipeerService
     private let ni = NearbyInteractionManager()
     private let location = LocationManager()
+    private let beacon = FindableBeacon()
+    private let scanner = FindableScanner()
 
     private var peerIDs: [String: MCPeerID] = [:] // key -> MCPeerID for sending
     private var myCoord: CLLocationCoordinate2D?
@@ -20,9 +33,15 @@ final class CompassViewModel: NSObject, ObservableObject {
     private var started = false
 
     override init() {
+        let storedName = UserDefaults.standard.string(forKey: Self.nameKey)
+        let name = storedName ?? UIDevice.current.name
+        displayName = name
+        findableMode = UserDefaults.standard.bool(forKey: Self.findableKey)
+        mpc = MultipeerService(displayName: name)
         super.init()
         mpc.delegate = self
         ni.delegate = self
+        scanner.delegate = self
         location.onLocation = { [weak self] c in self?.handleMyLocation(c) }
         location.onHeading = { [weak self] h in
             self?.myHeading = h
@@ -35,13 +54,48 @@ final class CompassViewModel: NSObject, ObservableObject {
         started = true
         mpc.start()
         location.start()
+        scanner.start()
+        updateBeacon()
+    }
+
+    // MARK: identity
+    func setDisplayName(_ raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != displayName else { return }
+        displayName = name
+        UserDefaults.standard.set(name, forKey: Self.nameKey)
+        rebuildMPC()
+        if findableMode { beacon.start(displayName: name) } // re-advertise new name
+    }
+    private func rebuildMPC() {
+        mpc.stop()
+        peers.removeAll { $0.kind == .mpc }
+        peerIDs.removeAll()
+        mpc = MultipeerService(displayName: displayName)
+        mpc.delegate = self
+        if started { mpc.start() }
+    }
+
+    // MARK: findable mode
+    private func updateBeacon() {
+        if findableMode {
+            beacon.start(displayName: displayName)
+            location.setBackgroundUpdates(true)
+            if let c = myCoord { beacon.update(lat: c.latitude, lon: c.longitude) }
+        } else {
+            beacon.stop()
+            location.setBackgroundUpdates(false)
+        }
     }
 
     // MARK: navigation
     func startNavigating(to key: String) {
         activePeerKey = key
-        if uwbSupported { ni.start(peerKey: key) } // emits our token via delegate
-        sendLocation(to: key)
+        guard let peer = peers.first(where: { $0.id == key }) else { return }
+        if peer.kind == .mpc {
+            if uwbSupported { ni.start(peerKey: key) } // emits our token via delegate
+            sendLocation(to: key)
+        }
     }
     func stopNavigating() {
         if let k = activePeerKey { ni.stop(peerKey: k) }
@@ -52,6 +106,7 @@ final class CompassViewModel: NSObject, ObservableObject {
     private func handleMyLocation(_ c: CLLocationCoordinate2D) {
         myCoord = c
         if let k = activePeerKey { sendLocation(to: k) }
+        if findableMode { beacon.update(lat: c.latitude, lon: c.longitude) }
         recomputeBearings()
     }
     private func sendLocation(to key: String) {
@@ -131,5 +186,30 @@ extension CompassViewModel: NearbyInteractionManagerDelegate {
         peers[i].uwbDirection = direction
         if let d { peers[i].distance = d; peers[i].source = .uwb }
         if direction == nil && d == nil { peers[i].source = .gps }
+    }
+}
+
+extension CompassViewModel: FindableScannerDelegate {
+    func scanner(_ s: FindableScanner, didUpdatePeer id: String,
+                 name: String?, location loc: BeaconLocation?, rssi: Int?) {
+        let key = "ble:" + id
+        var index = peers.firstIndex { $0.id == key }
+        if index == nil {
+            peers.append(Peer(id: key, name: "Friend…", kind: .ble))
+            index = peers.count - 1
+        }
+        guard let i = index else { return }
+        peers[i].connected = true
+        if let name, !name.isEmpty { peers[i].name = name }
+        if let rssi { peers[i].rssi = rssi }
+        if let loc { peers[i].lastLat = loc.lat; peers[i].lastLon = loc.lon }
+        recomputeBearings()
+    }
+    func scanner(_ s: FindableScanner, didLosePeer id: String) {
+        let key = "ble:" + id
+        if let i = peers.firstIndex(where: { $0.id == key }) {
+            peers[i].connected = false
+            peers[i].rssi = nil
+        }
     }
 }

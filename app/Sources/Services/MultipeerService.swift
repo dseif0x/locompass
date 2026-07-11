@@ -1,6 +1,5 @@
 import Foundation
 import MultipeerConnectivity
-import UIKit
 
 protocol MultipeerServiceDelegate: AnyObject {
     func multipeer(_ s: MultipeerService, didDiscover peerID: MCPeerID)
@@ -21,11 +20,9 @@ final class MultipeerService: NSObject {
 
     var connectedPeers: [MCPeerID] { session.connectedPeers }
 
-    override init() {
-        // Suffix guarantees a unique MCPeerID even if two devices share a name
-        // (iOS 16+ often reports a generic "iPhone").
-        let base = UIDevice.current.name
-        let unique = "\(base)#\(UUID().uuidString.prefix(4))"
+    init(displayName: String) {
+        // Suffix guarantees a unique MCPeerID even if two devices share a name.
+        let unique = "\(displayName)#\(UUID().uuidString.prefix(4))"
         myPeerID = MCPeerID(displayName: unique)
         session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: Self.serviceType)

@@ -4,8 +4,14 @@ Pairing is fully local via MultipeerConnectivity — no server, no accounts.
 
     cd app && xcodegen generate && open Locompass.xcodeproj
 
-Requires two UWB iPhones (12+). Both must have the app open and be within
-Bluetooth/Wi-Fi range. UWB does not work in the Simulator.
+Requires two UWB iPhones (12+). For the precise UWB arrow both phones must
+have the app open in the foreground. UWB does not work in the Simulator.
+
+**Findable mode:** toggle "Findable while locked" and you can pocket your
+locked phone — the app keeps broadcasting over BLE and serving your GPS
+position in the background, so a friend can walk to you with a GPS arrow and
+a Bluetooth signal-strength meter. Works fully offline (no cell service
+needed). The app must stay running (don't force-quit it).
 
 ## Install (ad-hoc, registered devices only)
 
