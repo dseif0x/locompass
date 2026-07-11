@@ -33,7 +33,7 @@ struct PersonMapView: View {
             VStack(spacing: 0) {
                 Map(coordinateRegion: $region, showsUserLocation: true,
                     annotationItems: [Pin(coord: info.coordinate)]) { pin in
-                    MapMarker(coordinate: pin.coord, tint: .red)
+                    MapMarker(coordinate: pin.coord, tint: .blue)
                 }
                 .onAppear {
                     if !didCenter {

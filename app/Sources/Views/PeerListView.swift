@@ -60,7 +60,7 @@ struct PeerListView: View {
                         NavigationLink { PersonMapView(name: person.name) } label: {
                             HStack {
                                 Image(systemName: "mappin.circle")
-                                    .foregroundStyle(person.lat != nil ? .red : .secondary)
+                                    .foregroundStyle(person.lat != nil ? Color.blue : Color.secondary)
                                 Text(person.name)
                                 Spacer()
                                 Text(seenText(person)).font(.footnote).foregroundStyle(.secondary)

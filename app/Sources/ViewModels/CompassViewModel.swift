@@ -209,7 +209,10 @@ final class CompassViewModel: NSObject, ObservableObject {
             guard let lat = peers[i].lastLat, let lon = peers[i].lastLon else { continue }
             let p = CLLocationCoordinate2D(latitude: lat, longitude: lon)
             peers[i].absBearing = Geo.bearing(from: me, to: p)
-            if peers[i].uwbDirection == nil { // GPS only owns readout when UWB is silent
+            // GPS only owns the readout when UWB ranging is stale — UWB often
+            // has distance but no direction, and must not be overwritten then.
+            let uwbFresh = peers[i].lastUWB.map { Date().timeIntervalSince($0) < 3 } ?? false
+            if !uwbFresh {
                 peers[i].distance = Float(Geo.distance(from: me, to: p))
                 peers[i].source = .gps
             }
@@ -277,8 +280,15 @@ extension CompassViewModel: NearbyInteractionManagerDelegate {
                    direction: simd_float3?, forPeer key: String) {
         guard let i = peers.firstIndex(where: { $0.id == key }) else { return }
         peers[i].uwbDirection = direction
-        if let d { peers[i].distance = d; peers[i].source = .uwb }
-        if direction == nil && d == nil { peers[i].source = .gps }
+        if let d {
+            peers[i].distance = d
+            peers[i].source = .uwb
+            peers[i].lastUWB = Date()
+        }
+        if d == nil && direction == nil { // UWB lost the peer — GPS may take over
+            peers[i].lastUWB = nil
+            peers[i].source = peers[i].absBearing != nil ? .gps : .none
+        }
     }
 }
 

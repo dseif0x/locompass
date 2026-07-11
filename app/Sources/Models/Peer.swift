@@ -14,6 +14,7 @@ struct Peer: Identifiable, Equatable {
 
     var distance: Float?       // meters (UWB or GPS)
     var uwbDirection: simd_float3?
+    var lastUWB: Date?         // last time UWB delivered a distance
     var absBearing: Double?    // 0..360 true-north bearing (GPS)
     var lastLat: Double?
     var lastLon: Double?

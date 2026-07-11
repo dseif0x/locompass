@@ -69,7 +69,10 @@ struct CompassView: View {
 
     private func label(_ s: NavSource) -> String {
         switch s {
-        case .uwb:  return "Precise (UWB)"
+        case .uwb:
+            // Distance is UWB-precise; the arrow may still be GPS if the peer
+            // is outside the UWB antenna's field of view.
+            return peer?.uwbDirection != nil ? "Precise (UWB)" : "Precise distance (UWB) · GPS arrow"
         case .gps:  return "Approximate (GPS)"
         case .none: return "Acquiring…"
         }
